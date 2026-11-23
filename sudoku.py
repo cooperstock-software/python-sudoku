@@ -472,6 +472,35 @@ BUTTONS = {
 	    "load": (9, 479, 92, 32), "save": (122, 479, 92, 30), "options": (316, 478, 94, 30),
 	    "switch": (9, 527, 206, 30), "help": (319, 530, 94, 31)},
 }
+BUTTON_TEXT_MARGIN = 14      # room needed each side of a button's text on a Mac, whose rounded buttons clip it otherwise
+
+
+def button_layout(n: int, manual_text_width: int) -> dict[str, tuple[int, int, int, int]]:
+	"""The (left, top, width, height) of each button for the n x n window. The Delphi positions are used, unless the
+	"Manual Play" text (manual_text_width pixels wide) doesn't fit in its button. Then the left column of buttons is
+	made wider (all the same width, so "Manual Play" and the button under it match), and the next column is moved
+	right by the same amount, so the gap between them stays the same. The buttons further right don't move."""
+	layout = dict(BUTTONS[n])
+	manual_left, _, manual_width, _ = layout["manual"]
+	extra = manual_text_width + 2 * BUTTON_TEXT_MARGIN - manual_width
+	if extra <= 0:
+		return layout
+	next_column = layout["solve"][0]
+	for name, (left, top, width, height) in BUTTONS[n].items():
+		if left == manual_left:
+			# ("Switch" in the 6x6 window spans the first two columns, so it grows by as much as the gap moves)
+			layout[name] = (left, top, width + extra if name == "switch" else manual_width + extra, height)
+		elif left == next_column:
+			layout[name] = (left + extra, top, width, height)
+	return layout
+
+
+def hot_key_sequences(letter: str) -> list[str]:
+	"""The key presses that act as the hot key for a button, whose caption has the letter underlined: Alt plus the
+	letter. A Mac's Alt key (Option) types other characters instead, and a Windows keyboard has no Command key, so
+	there Command (the Windows key) or Control plus the letter work."""
+	modifiers = ("Command", "Control") if sys.platform == "darwin" else ("Alt",)
+	return [f"<{modifier}-{key}>" for modifier in modifiers for key in (letter.lower(), letter.upper())]
 
 HELP_TEXT = """\
 Entering a puzzle
@@ -516,6 +545,11 @@ Switches between the 9x9 and 6x6 puzzles. Each keeps its own squares.
 
 Clear
 Clears the whole puzzle.
+
+Hot keys
+The underlined letter in a button's name (or in an option in the Options window) is its hot key: hold down Alt \
+and press the letter. On a Mac, hold down Command (the Windows key on a Windows keyboard) or Control instead. \
+A Mac doesn't underline the letters.
 """
 
 
@@ -617,12 +651,14 @@ class SudokuWindow:
 			("help", "Help", 0, self.on_help),
 			("switch", f"Switch to {other}x{other} Sudoku", 1, self.on_switch),
 		]
+		layout = button_layout(n, app.ui_font.measure("Manual Play") if sys.platform == "darwin" else 0)
 		for name, text, underline, action in button_specs:
-			left, top, w, h = BUTTONS[n][name]
+			left, top, w, h = layout[name]
 			button = ttk.Button(win, text=text, underline=underline, command=self.guarded(action))
 			button.place(x=left, y=top, width=w, height=h)
 			self.buttons[name] = button
-			win.bind(f"<Alt-{text[underline].lower()}>", lambda event, b=button: b.invoke())
+			for sequence in hot_key_sequences(text[underline]):
+				win.bind(sequence, lambda event, b=button: b.invoke())
 
 		win.bind("<Key>", self.on_key)
 		self.redraw()
@@ -1044,7 +1080,8 @@ class OptionsDialog(tk.Toplevel):
 
 		def add(widget, key):
 			self.accelerators[key] = widget
-			self.bind(f"<Alt-{key}>", lambda event: widget.invoke())
+			for sequence in hot_key_sequences(key):
+				self.bind(sequence, lambda event: widget.invoke())
 
 		def checkbox(text, variable, left, top, underline):
 			box = ttk.Checkbutton(self, text=text, variable=variable, underline=underline)
