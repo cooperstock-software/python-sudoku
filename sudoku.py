@@ -472,20 +472,25 @@ BUTTONS = {
 	    "load": (9, 479, 92, 32), "save": (122, 479, 92, 30), "options": (316, 478, 94, 30),
 	    "switch": (9, 527, 206, 30), "help": (319, 530, 94, 31)},
 }
-BUTTON_TEXT_MARGIN = 14      # room needed each side of a button's text on a Mac, whose rounded buttons clip it otherwise
+BUTTON_TEXT_MARGIN = 26      # room left each side of a button's text on a Mac, whose rounded buttons clip it otherwise
+BUTTON_SPARE_WIDTH = 16      # and extra room on top of the width Tk says the button needs
 
 
-def button_layout(n: int, manual_text_width: int) -> dict[str, tuple[int, int, int, int]]:
-	"""The (left, top, width, height) of each button for the n x n window. The Delphi positions are used, unless the
-	"Manual Play" text (manual_text_width pixels wide) doesn't fit in its button. Then the left column of buttons is
-	made wider (all the same width, so "Manual Play" and the button under it match), and the next column is moved
-	right by the same amount, so the gap between them stays the same. The buttons further right don't move."""
+def button_layout(n: int, manual_width_needed: int) -> dict[str, tuple[int, int, int, int]]:
+	"""The (left, top, width, height) of each button for the n x n window. The Delphi positions are used, unless
+	the "Manual Play" button needs to be wider than that layout makes it (manual_width_needed pixels). Then the left
+	column of buttons is made wider (all the same width, so "Manual Play" and the button under it match), and the
+	next column is moved right by the same amount, so the gap between them stays the same. The buttons further
+	right don't move, so the growth is limited to what leaves the same size of gap before them."""
 	layout = dict(BUTTONS[n])
 	manual_left, _, manual_width, _ = layout["manual"]
-	extra = manual_text_width + 2 * BUTTON_TEXT_MARGIN - manual_width
+	next_column = layout["solve"][0]
+	next_column_right = max(left + width for left, _, width, _ in BUTTONS[n].values() if left == next_column)
+	right_of_that = min(left for left, _, _, _ in BUTTONS[n].values() if left > next_column)
+	extra = min(manual_width_needed - manual_width,
+	            right_of_that - next_column_right - (next_column - (manual_left + manual_width)))     # keep the gaps
 	if extra <= 0:
 		return layout
-	next_column = layout["solve"][0]
 	for name, (left, top, width, height) in BUTTONS[n].items():
 		if left == manual_left:
 			# ("Switch" in the 6x6 window spans the first two columns, so it grows by as much as the gap moves)
@@ -651,14 +656,18 @@ class SudokuWindow:
 			("help", "Help", 0, self.on_help),
 			("switch", f"Switch to {other}x{other} Sudoku", 1, self.on_switch),
 		]
-		layout = button_layout(n, app.ui_font.measure("Manual Play") if sys.platform == "darwin" else 0)
 		for name, text, underline, action in button_specs:
-			left, top, w, h = layout[name]
 			button = ttk.Button(win, text=text, underline=underline, command=self.guarded(action))
-			button.place(x=left, y=top, width=w, height=h)
 			self.buttons[name] = button
 			for sequence in hot_key_sequences(text[underline]):
 				win.bind(sequence, lambda event, b=button: b.invoke())
+		manual_width_needed = 0                # (only a Mac's buttons need more room than the Delphi layout gives)
+		if sys.platform == "darwin":
+			win.update_idletasks()
+			manual_width_needed = max(self.buttons["manual"].winfo_reqwidth() + BUTTON_SPARE_WIDTH,
+			                          app.ui_font.measure("Manual Play") + 2 * BUTTON_TEXT_MARGIN)
+		for name, (left, top, w, h) in button_layout(n, manual_width_needed).items():
+			self.buttons[name].place(x=left, y=top, width=w, height=h)
 
 		win.bind("<Key>", self.on_key)
 		self.redraw()
